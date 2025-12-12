@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>G.O.D. // Google OSINT Dorker CLI</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <!-- Google Fonts: JetBrains Mono for that CLI feel -->
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
+
+    <!-- Chosen Palette: Matrix/Cyberpunk Terminal -->
+    <!-- Primary: #00FF41 (Terminal Green) or #FFB000 (Amber) on #0C0C0C (Void Black) -->
+    <!-- Application Structure Plan: 
+         The app is designed as a "Web-Based CLI" (Command Line Interface). 
+         1. TOP BAR: Status indicators (IP, connection, time).
+         2. LEFT PANEL: "Quick Access" modules that act as macros for CLI commands.
+         3. MAIN PANEL: The "Terminal Output" where data is rendered. 
+            - 'DATABASE' renders the content from sopro.txt in a data grid.
+            - 'BUILDER' implements the logic from eval.txt to construct dorks.
+            - 'ANALYTICS' uses Chart.js to visualize the dork dataset.
+         4. BOTTOM BAR: The Command Input field.
+         Rationale: This structure satisfies the user's request for a "Linux CLI tool" while remaining a functional web SPA.
+    -->
+
+    <style>
+        body {
+            font-family: 'JetBrains Mono', monospace;
+            background-color: #050505;
+            color: #e0e0e0;
+            overflow: hidden; /* Prevent body scroll, handle inside terminal */
+        }
+
+        /* Custom Scrollbar for Terminal Feel */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #111; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #333; 
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #00ff41; 
+        }
+
+        /* CRT Scanline Effect */
+        .scanlines {
+            background: linear-gradient(
+                to bottom,
+                rgba(255,255,255,0),
+                rgba(255,255,255,0) 50%,
+                rgba(0,0,0,0.2) 50%,
+                rgba(0,0,0,0.2)
+            );
+            background-size: 100% 4px;
+            position: fixed;
+            pointer-events: none;
+            top: 0; right: 0; bottom: 0; left: 0;
+            z-index: 50;
+        }
+
+        /* Neon Glow Utility */
+        .text-neon-green {
+            color: #00ff41;
+            text-shadow: 0 0 5px rgba(0, 255, 65, 0.5);
+        }
+        .border-neon-green {
+            border-color: #00ff41;
+            box-shadow: 0 0 5px rgba(0, 255, 65, 0.3);
+        }
+        
+        .text-neon-amber {
+            color: #ffb000;
+            text-shadow: 0 0 5px rgba(255, 176, 0, 0.5);
+        }
+
+        /* Chart Container Strict Styling */
+        .chart-container {
+            position: relative;
+            width: 100%;
+            max-width: 600px;
+            margin-left: auto;
+            margin-right: auto;
+            height: 300px;
+            max-height: 350px;
+        }
+
+        /* Typing cursor animation */
+        .cursor-blink {
+            animation: blink 1s step-end infinite;
+        }
+        @keyframes blink {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0; }
+        }
+
+        /* Glitch effect on hover */
+        .glitch-hover:hover {
+            text-shadow: 2px 0 #ff00c1, -2px 0 #00fff9;
+        }
+    </style>
+</head>
+<body class="h-screen w-screen flex flex-col text-sm md:text-base">
+
+    <!-- CRT Overlay -->
+    <div class="scanlines"></div>
+
+    <!-- Header / Status Bar -->
+    <header class="flex-none h-12 border-b border-gray-800 bg-[#0a0a0a] flex items-center justify-between px-4 z-10">
+        <div class="flex items-center space-x-4">
+            <span class="text-neon-green font-bold text-lg tracking-widest">G.O.D. CLI v2.0</span>
+            <span class="text-xs text-gray-500 hidden sm:inline-block">[ SYSTEM: ONLINE ]</span>
+            <span class="text-xs text-gray-500 hidden sm:inline-block">[ KERNEL: 5.15.0-generic ]</span>
+        </div>
+        <div class="flex items-center space-x-4 text-xs">
+            <span class="text-neon-amber" id="clock">00:00:00</span>
+            <span class="text-gray-400">IP: <span class="text-gray-200">127.0.0.1</span> (PROXY)</span>
+        </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <div class="flex-1 flex overflow-hidden relative z-10">
+        
+        <!-- Sidebar (Quick Actions) -->
+        <aside class="w-16 md:w-64 flex-none border-r border-gray-800 bg-[#080808] flex flex-col">
+            <div class="p-4 border-b border-gray-800 hidden md:block">
+                <h3 class="text-gray-400 text-xs uppercase tracking-wider mb-2">Modules</h3>
+                <p class="text-[10px] text-gray-600">Select to execute</p>
+            </div>
+            
+            <nav class="flex-1 overflow-y-auto py-2">
+                <button onclick="app.navigate('dashboard')" class="w-full text-left px-4 py-3 hover:bg-gray-900 hover:text-neon-green transition-colors border-l-2 border-transparent hover:border-neon-green group">
+                    <span class="md:hidden">DB</span>
+                    <span class="hidden md:inline font-bold">> ./load_database</span>
+                    <div class="hidden md:block text-[10px] text-gray-600 pl-4 group-hover:text-gray-400">View Dork Repository</div>
+                </button>
+                
+                <button onclick="app.navigate('builder')" class="w-full text-left px-4 py-3 hover:bg-gray-900 hover:text-neon-green transition-colors border-l-2 border-transparent hover:border-neon-green group">
+                    <span class="md:hidden">BLD</span>
+                    <span class="hidden md:inline font-bold">> ./dork_gen</span>
+                    <div class="hidden md:block text-[10px] text-gray-600 pl-4 group-hover:text-gray-400">Interactive Constructor</div>
+                </button>
+
+                <button onclick="app.navigate('analytics')" class="w-full text-left px-4 py-3 hover:bg-gray-900 hover:text-neon-green transition-colors border-l-2 border-transparent hover:border-neon-green group">
+                    <span class="md:hidden">STA</span>
+                    <span class="hidden md:inline font-bold">> ./sys_status</span>
+                    <div class="hidden md:block text-[10px] text-gray-600 pl-4 group-hover:text-gray-400">Visual Analytics</div>
+                </button>
+
+                <button onclick="app.navigate('help')" class="w-full text-left px-4 py-3 hover:bg-gray-900 hover:text-neon-green transition-colors border-l-2 border-transparent hover:border-neon-green group">
+                    <span class="md:hidden">HLP</span>
+                    <span class="hidden md:inline font-bold">> ./man_pages</span>
+                    <div class="hidden md:block text-[10px] text-gray-600 pl-4 group-hover:text-gray-400">Usage Guide</div>
+                </button>
+            </nav>
+
+            <div class="p-4 border-t border-gray-800 text-[10px] text-gray-600 hidden md:block">
+                STATUS: WAITING FOR INPUT<br>
+                MEM: 64%<br>
+                CPU: 12%
+            </div>
+        </aside>
+
+        <!-- Terminal Output Area -->
+        <main class="flex-1 bg-black p-4 md:p-6 overflow-y-auto relative" id="main-terminal">
+            
+            <!-- Dashboard / Database View -->
+            <div id="view-dashboard" class="space-y-6 hidden">
+                <div class="border-b border-gray-700 pb-2 mb-4">
+                    <h1 class="text-xl text-neon-green font-bold mb-1">>> DATABASE_VIEWER</h1>
+                    <p class="text-gray-400 text-sm">Loaded: "sopro.txt" | "eval.txt" | <span id="db-count">0</span> records found.</p>
+                </div>
+
+                <!-- Introduction to this view -->
+                <div class="bg-gray-900 border-l-2 border-neon-green p-4 text-gray-300 text-sm mb-6">
+                    <p>
+                        <strong class="text-white">MODULE INFO:</strong> This module provides direct access to the "High Value" dork list extracted from the source intelligence. 
+                        It includes filters for finding specific vulnerabilities (Cloud Keys, Database Dumps, Configuration Files). 
+                        Use the search bar below to grep the database.
+                    </p>
+                </div>
+
+                <!-- Controls -->
+                <div class="flex flex-col md:flex-row gap-4 mb-4">
+                    <input type="text" id="db-search" placeholder="grep 'search_term'..." 
+                           class="bg-gray-900 border border-gray-700 text-neon-green p-2 flex-1 focus:outline-none focus:border-neon-green font-mono">
+                    <select id="db-filter" class="bg-gray-900 border border-gray-700 text-gray-300 p-2 focus:outline-none focus:border-neon-green font-mono">
+                        <option value="all">filter: *</option>
+                        <option value="cloud">filter: cloud_keys</option>
+                        <option value="config">filter: config_files</option>
+                        <option value="db">filter: databases</option>
+                        <option value="finance">filter: financial</option>
+                        <option value="logs">filter: logs</option>
+                    </select>
+                </div>
+
+                <!-- Results Grid -->
+                <div class="grid grid-cols-1 gap-2" id="db-results">
+                    <!-- JS Injected Items Here -->
+                </div>
+            </div>
+
+            <!-- Builder View -->
+            <div id="view-builder" class="space-y-6 hidden">
+                <div class="border-b border-gray-700 pb-2 mb-4">
+                    <h1 class="text-xl text-neon-amber font-bold mb-1">>> DORK_CONSTRUCTOR</h1>
+                    <p class="text-gray-400 text-sm">Logic Source: "eval.txt" | Status: Ready to Compile</p>
+                </div>
+
+                <!-- Introduction to this view -->
+                <div class="bg-gray-900 border-l-2 border-neon-amber p-4 text-gray-300 text-sm mb-6">
+                    <p>
+                        <strong class="text-white">MODULE INFO:</strong> Based on the "eval.txt" tutorial, this tool assembles High Quality (HQ) dorks by combining specific 
+                        <strong>PageFormats</strong> (file extensions) with <strong>PageTypes</strong> (parameters) and <strong>Keywords</strong>. 
+                        Select components below to generate a query string designed to bypass low-quality results.
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                    
+                    <!-- Input Column -->
+                    <div class="lg:col-span-1 space-y-4">
+                        <div class="bg-gray-900 p-4 border border-gray-800">
+                            <label class="block text-xs text-gray-500 mb-1">TARGET_KEYWORD</label>
+                            <input type="text" id="bld-keyword" placeholder="e.g. Fortnite, Netflix" 
+                                   class="w-full bg-black border border-gray-700 p-2 text-white focus:border-neon-amber focus:outline-none">
+                        </div>
+
+                        <div class="bg-gray-900 p-4 border border-gray-800">
+                            <label class="block text-xs text-gray-500 mb-1">PAGE_FORMAT (Extension)</label>
+                            <select id="bld-format" class="w-full bg-black border border-gray-700 p-2 text-white focus:border-neon-amber focus:outline-none">
+                                <option value=".php?">.php? (Standard)</option>
+                                <option value=".aspx?">.aspx? (Microsoft)</option>
+                                <option value=".cfm?">.cfm? (ColdFusion)</option>
+                                <option value=".cgi?">.cgi? (Script)</option>
+                                <option value=".jsf?">.jsf? (Java)</option>
+                                <option value=".json">.json (Data)</option>
+                                <option value=".env">.env (Config)</option>
+                            </select>
+                        </div>
+
+                        <div class="bg-gray-900 p-4 border border-gray-800">
+                            <label class="block text-xs text-gray-500 mb-1">PAGE_TYPE (Parameter)</label>
+                            <select id="bld-type" class="w-full bg-black border border-gray-700 p-2 text-white focus:border-neon-amber focus:outline-none">
+                                <option value="id=">id= (Generic)</option>
+                                <option value="catid=">catid= (Category)</option>
+                                <option value="item_ID=">item_ID= (E-comm)</option>
+                                <option value="GameID=">GameID= (Gaming)</option>
+                                <option value="user_id=">user_id= (User)</option>
+                                <option value="token=">token= (Auth)</option>
+                                <option value="action=">action= (Function)</option>
+                            </select>
+                        </div>
+                        
+                        <button onclick="app.generateDork()" class="w-full bg-neon-amber text-black font-bold py-2 hover:bg-yellow-400 transition-colors">
+                            [ COMPILE_DORK ]
+                        </button>
+                    </div>
+
+                    <!-- Output Column -->
+                    <div class="lg:col-span-2 flex flex-col space-y-4">
+                        <div class="flex-1 bg-[#111] border border-gray-700 p-4 font-mono text-sm relative">
+                            <div class="absolute top-2 right-2 text-xs text-gray-600">OUTPUT_BUFFER</div>
+                            <div id="bld-output" class="text-neon-amber pt-4 break-all">
+                                // Awaiting input...
+                            </div>
+                        </div>
+                        
+                        <div class="bg-gray-900 p-4 text-xs text-gray-400 border border-gray-800">
+                            <h4 class="text-white mb-2 underline">ANALYSIS (from eval.txt):</h4>
+                            <p id="bld-analysis">Select parameters to see "Trash" vs "HQ" analysis.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Analytics View -->
+            <div id="view-analytics" class="space-y-6 hidden">
+                <div class="border-b border-gray-700 pb-2 mb-4">
+                    <h1 class="text-xl text-blue-400 font-bold mb-1">>> SYSTEM_ANALYTICS</h1>
+                    <p class="text-gray-400 text-sm">Visualizing "sopro.txt" Data Vectors</p>
+                </div>
+
+                <!-- Introduction to this view -->
+                <div class="bg-gray-900 border-l-2 border-blue-400 p-4 text-gray-300 text-sm mb-6">
+                    <p>
+                        <strong class="text-white">MODULE INFO:</strong> This dashboard visualizes the composition of the provided dork database. 
+                        Understanding the distribution of dorks (e.g., how many target Cloud keys vs Database dumps) helps prioritizing OSINT efforts.
+                    </p>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    
+                    <!-- Chart 1: Database Composition -->
+                    <div class="bg-gray-900 border border-gray-800 p-4">
+                        <h3 class="text-xs text-gray-500 mb-4 text-center">VECTOR_DISTRIBUTION</h3>
+                        <div class="chart-container">
+                            <canvas id="chart-composition"></canvas>
+                        </div>
+                        <p class="text-center text-[10px] text-gray-500 mt-2">Source: sopro.txt categorization</p>
+                    </div>
+
+                    <!-- Chart 2: Dork Quality Logic -->
+                    <div class="bg-gray-900 border border-gray-800 p-4">
+                        <h3 class="text-xs text-gray-500 mb-4 text-center">DORK_EFFICACY_MODEL</h3>
+                        <div class="chart-container">
+                            <canvas id="chart-quality"></canvas>
+                        </div>
+                        <p class="text-center text-[10px] text-gray-500 mt-2">Source: eval.txt logic model</p>
+                    </div>
+
+                </div>
+            </div>
+
+            <!-- Help View -->
+            <div id="view-help" class="space-y-6 hidden">
+                <div class="border-b border-gray-700 pb-2 mb-4">
+                    <h1 class="text-xl text-white font-bold mb-1">>> MAN_PAGES</h1>
+                </div>
+                
+                <div class="space-y-4 text-gray-300 text-sm font-mono">
+                    <div class="p-4 bg-gray-900 border border-gray-800">
+                        <h3 class="text-neon-green mb-2">Command Syntax</h3>
+                        <p>This interface accepts both mouse interaction and simulated CLI logic.</p>
+                        <ul class="list-disc pl-5 mt-2 space-y-1 text-gray-400">
+                            <li><span class="text-white">DB Module:</span> Contains 20+ verified dorks from `sopro.txt` targeting high-value assets like Firebase, AWS, and SQL.</li>
+                            <li><span class="text-white">Builder:</span> Constructs queries based on the "PageType/PageFormat" methodology found in `eval.txt`.</li>
+                            <li><span class="text-white">Colors:</span> <span class="text-neon-green">Green</span> items are verified. <span class="text-neon-amber">Amber</span> items are generated.</li>
+                        </ul>
+                    </div>
+
+                    <div class="p-4 bg-gray-900 border border-gray-800">
+                        <h3 class="text-white mb-2">Source Material Reference</h3>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <h4 class="text-xs text-gray-500 uppercase">sopro.txt</h4>
+                                <p class="text-xs mt-1">Provided a list of complex Google operators for finding API keys, private keys, and database dumps.</p>
+                            </div>
+                            <div>
+                                <h4 class="text-xs text-gray-500 uppercase">eval.txt</h4>
+                                <p class="text-xs mt-1">Provided a tutorial on constructing "HQ" dorks vs "Trash" dorks using specific parameters.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- Footer / Command Input -->
+    <footer class="flex-none h-12 bg-[#050505] border-t border-gray-800 flex items-center px-4 z-20">
+        <span class="text-neon-green font-bold mr-2">root@god-osint:~#</span>
+        <input type="text" id="cli-input" class="flex-1 bg-transparent border-none outline-none text-white font-mono" 
+               placeholder="Type command or click modules..." autocomplete="off">
+        <span class="cursor-blink w-2 h-4 bg-neon-green inline-block ml-1"></span>
+    </footer>
+
+    <!-- Visualization & Content Choices:
+         1. Database View: 
+            - Goal: Inform/Organize. 
+            - Method: Filterable HTML Grid. 
+            - Interaction: Real-time Javascript filtering based on category tags derived from 'sopro.txt'.
+            - Justification: Best way to handle a list of text-heavy query strings.
+         
+         2. Builder View:
+            - Goal: Change/Create.
+            - Method: Form Inputs -> Dynamic Text String.
+            - Interaction: Users select dropdowns populated from 'eval.txt' data; JS updates the output instantly.
+            - Justification: Directly implements the "tutorial" aspect of 'eval.txt' in a functional way.
+
+         3. Analytics View:
+            - Goal: Relationships/Inform.
+            - Method: Chart.js Doughnut and Bar charts.
+            - Interaction: Hover effects for data values.
+            - Justification: Visualizes the "High Level" vs "Low Level" dork concepts explained in the text.
+    -->
+
+    <!-- CONFIRMATION: NO SVG graphics used. NO Mermaid JS used. -->
+
+    <script>
+        // --- DATA STORE (derived from source files) ---
+        
+        // From sopro.txt
+        const dorkDatabase = [
+            { id: 1, type: 'cloud', label: 'Firebase Configs', dork: 'site:*.firebaseapp.com intext:"firebaseConfig" "measurementId"', severity: 'CRITICAL' },
+            { id: 2, type: 'cloud', label: 'Google AppSpot Keys', dork: 'site:*.appspot.com intext:"FIRESTORE_PRIVATE_KEY" "BEGIN PRIVATE KEY"', severity: 'CRITICAL' },
+            { id: 3, type: 'config', label: 'Env Files', dork: 'filetype:env "SENTRY_AUTH_TOKEN" "sentry_key"', severity: 'HIGH' },
+            { id: 4, type: 'db', label: 'WP Backups', dork: 'inurl:/wp-content/backups-dup-lite/tmp intext:"db_password"', severity: 'HIGH' },
+            { id: 5, type: 'finance', label: 'Plaid Keys', dork: 'inurl:/api/admin intext:"PLAID_CLIENT_ID" intext:"PLAID_SECRET"', severity: 'CRITICAL' },
+            { id: 6, type: 'cloud', label: 'Vercel Resend Keys', dork: 'site:*.vercel.app intext:"RESEND_API_KEY" | "re_"', severity: 'MEDIUM' },
+            { id: 7, type: 'config', label: 'Git Tokens', dork: 'inurl:/.git/config intext:"github.com" intext:"token"', severity: 'HIGH' },
+            { id: 8, type: 'logs', label: 'Mixpanel Tokens', dork: 'site:*.mycelium.is intext:"MIXPANEL_TOKEN" OR intext:"segment"', severity: 'MEDIUM' },
+            { id: 9, type: 'cloud', label: 'Hubspot API', dork: 'inurl:/hub/api intext:"HUBSPOT_API_KEY" OR intext:"hapikey"', severity: 'HIGH' },
+            { id: 10, type: 'config', label: 'Netlify Tokens', dork: 'site:*.netlify.app/.netlify intext:"site_id" intext:"access_token"', severity: 'HIGH' },
+            { id: 11, type: 'db', label: 'GraphQL Introspection', dork: 'inurl:/graphql?query= intext:"__schema" intext:"admin"', severity: 'MEDIUM' },
+            { id: 12, type: 'finance', label: 'Stripe API (JSON)', dork: 'inurl:/api/v1 intext:"stripe.com" ext:json', severity: 'HIGH' },
+            { id: 13, type: 'config', label: 'AWS Keys', dork: 'site:github.com "AWS_ACCESS_KEY_ID" "AWS_SECRET_ACCESS_KEY" -removed', severity: 'CRITICAL' },
+            { id: 14, type: 'finance', label: 'Billing Portals', dork: 'intitle:"billing portal" intext:"recurly" | "chargebee" | "paddle"', severity: 'MEDIUM' },
+            { id: 15, type: 'db', label: 'Excel Passwords', dork: 'filetype:xlsx intext:"password" intext:"username" "confidential"', severity: 'MEDIUM' },
+            { id: 16, type: 'cloud', label: 'Railway Tokens', dork: 'site:*.railway.app/graphql intext:"railway-service-token"', severity: 'HIGH' },
+            { id: 17, type: 'config', label: 'Supabase Keys', dork: 'inurl:/.env.backup OR inurl:/.env.old "SUPABASE_SERVICE_ROLE_KEY"', severity: 'CRITICAL' },
+            { id: 18, type: 'cloud', label: 'Convex Private Keys', dork: 'site:*.convex.dev intext:"CONVEX_AUTH_PRIVATE_KEY" "BEGIN PRIVATE KEY"', severity: 'CRITICAL' }
+        ];
+
+        // From eval.txt
+        const builderLogic = {
+            trash: ['.html?', '.htm?', '.pdf?'],
+            lq: ['jobid=', 'topic=', 'langid='],
+            hq: ['GameID=', 'token=', 'user_id=', 'action='],
+            tips: {
+                trash: "EVAL.TXT ANALYSIS: This combination is likely 'Trash'. Static file extensions (.html, .pdf) rarely process dynamic SQL parameters.",
+                lq: "EVAL.TXT ANALYSIS: 'Low Quality'. These parameters are common but often sanitized or lead to generic content.",
+                hq: "EVAL.TXT ANALYSIS: 'HIGH QUALITY'. Parameters like ID, Token, or Action often interact directly with the database backend."
+            }
+        };
+
+        // --- APP LOGIC ---
+
+        const app = {
+            state: {
+                currentView: 'dashboard'
+            },
+
+            init: () => {
+                // Clock
+                setInterval(() => {
+                    const now = new Date();
+                    document.getElementById('clock').innerText = now.toLocaleTimeString('en-GB');
+                }, 1000);
+
+                // Initial Render
+                app.renderDB(dorkDatabase);
+                app.navigate('dashboard');
+                
+                // CLI Listener
+                document.getElementById('cli-input').addEventListener('keypress', (e) => {
+                    if (e.key === 'Enter') {
+                        app.handleCommand(e.target.value);
+                        e.target.value = '';
+                    }
+                });
+
+                // Init Charts
+                app.initCharts();
+            },
+
+            navigate: (viewId) => {
+                // Hide all
+                ['dashboard', 'builder', 'analytics', 'help'].forEach(id => {
+                    document.getElementById(`view-${id}`).classList.add('hidden');
+                });
+                
+                // Show target
+                document.getElementById(`view-${viewId}`).classList.remove('hidden');
+                app.state.currentView = viewId;
+                
+                // Simulate CLI output
+                console.log(`[SYS] Navigation > ${viewId}`);
+            },
+
+            handleCommand: (cmd) => {
+                const clean = cmd.trim().toLowerCase();
+                if (clean === 'clear') {
+                    // visual clear effect could go here
+                } else if (clean.includes('load_database') || clean === 'db') {
+                    app.navigate('dashboard');
+                } else if (clean.includes('dork_gen') || clean === 'bld') {
+                    app.navigate('builder');
+                } else if (clean.includes('sys_status') || clean === 'sta') {
+                    app.navigate('analytics');
+                } else if (clean.includes('man_pages') || clean === 'help') {
+                    app.navigate('help');
+                } else {
+                    // Error effect
+                    const input = document.getElementById('cli-input');
+                    input.placeholder = `ERR: Command '${clean}' not found. Try './man_pages'`;
+                    setTimeout(() => input.placeholder = "Type command or click modules...", 2000);
+                }
+            },
+
+            renderDB: (data) => {
+                const container = document.getElementById('db-results');
+                container.innerHTML = '';
+                document.getElementById('db-count').innerText = data.length;
+
+                data.forEach(item => {
+                    let severityColor = 'text-green-500';
+                    if (item.severity === 'CRITICAL') severityColor = 'text-red-500';
+                    if (item.severity === 'HIGH') severityColor = 'text-orange-400';
+
+                    const div = document.createElement('div');
+                    div.className = "bg-[#111] p-3 border-l-2 border-gray-700 hover:border-neon-green hover:bg-[#1a1a1a] transition-all group";
+                    div.innerHTML = `
+                        <div class="flex justify-between items-start">
+                            <h4 class="text-neon-green font-bold text-xs uppercase tracking-wider">[${item.type}] ${item.label}</h4>
+                            <span class="text-[10px] ${severityColor} border border-gray-800 px-1">${item.severity}</span>
+                        </div>
+                        <code class="block mt-2 text-gray-400 font-mono text-xs break-all group-hover:text-white select-all cursor-text">
+                            ${item.dork}
+                        </code>
+                    `;
+                    container.appendChild(div);
+                });
+            },
+
+            filterDB: () => {
+                const search = document.getElementById('db-search').value.toLowerCase();
+                const type = document.getElementById('db-filter').value;
+
+                const filtered = dorkDatabase.filter(item => {
+                    const matchesSearch = item.dork.toLowerCase().includes(search) || item.label.toLowerCase().includes(search);
+                    const matchesType = type === 'all' || item.type === type;
+                    return matchesSearch && matchesType;
+                });
+
+                app.renderDB(filtered);
+            },
+
+            generateDork: () => {
+                const kw = document.getElementById('bld-keyword').value || 'Target';
+                const fmt = document.getElementById('bld-format').value;
+                const type = document.getElementById('bld-type').value;
+
+                const dork = `"${kw}" ${fmt} ${type}`;
+                
+                const output = document.getElementById('bld-output');
+                output.innerText = dork;
+
+                // Logic check based on eval.txt
+                const analysis = document.getElementById('bld-analysis');
+                
+                let quality = 'lq'; // default
+                if (builderLogic.hq.includes(type) && !builderLogic.trash.includes(fmt)) {
+                    quality = 'hq';
+                } else if (builderLogic.trash.includes(fmt)) {
+                    quality = 'trash';
+                }
+
+                analysis.innerText = builderLogic.tips[quality];
+                analysis.className = quality === 'hq' ? 'text-neon-green' : (quality === 'trash' ? 'text-red-500' : 'text-yellow-500');
+            },
+
+            initCharts: () => {
+                // Prepare Data
+                const types = {};
+                dorkDatabase.forEach(i => { types[i.type] = (types[i.type] || 0) + 1; });
+
+                // Chart 1: Composition
+                const ctx1 = document.getElementById('chart-composition').getContext('2d');
+                new Chart(ctx1, {
+                    type: 'doughnut',
+                    data: {
+                        labels: Object.keys(types).map(k => k.toUpperCase()),
+                        datasets: [{
+                            data: Object.values(types),
+                            backgroundColor: ['#00ff41', '#ffb000', '#00b8ff', '#ff0055', '#9933ff'],
+                            borderColor: '#050505',
+                            borderWidth: 2
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { position: 'right', labels: { color: '#888', font: { family: 'JetBrains Mono' } } }
+                        }
+                    }
+                });
+
+                // Chart 2: Efficacy Model (Conceptual from eval.txt)
+                const ctx2 = document.getElementById('chart-quality').getContext('2d');
+                new Chart(ctx2, {
+                    type: 'bar',
+                    data: {
+                        labels: ['Trash Dorks', 'LQ Dorks', 'HQ Dorks'],
+                        datasets: [{
+                            label: 'Potential Yield (Hypothetical)',
+                            data: [10, 40, 95],
+                            backgroundColor: ['#ff0055', '#ffb000', '#00ff41']
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: { grid: { color: '#222' }, ticks: { color: '#666' } },
+                            x: { grid: { display: false }, ticks: { color: '#888', font: { family: 'JetBrains Mono' } } }
+                        },
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { callbacks: { label: (c) => `Yield Score: ${c.raw}/100` } }
+                        }
+                    }
+                });
+            }
+        };
+
+        // Listeners for DB Filters
+        document.getElementById('db-search').addEventListener('input', app.filterDB);
+        document.getElementById('db-filter').addEventListener('change', app.filterDB);
+
+        // Start
+        window.addEventListener('load', app.init);
+
+    </script>
+</body>
+</html>
